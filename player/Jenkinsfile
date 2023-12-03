@@ -1,0 +1,135 @@
+#!groovy
+
+/* custom, shared functions */
+def myCheckout() {
+	dir('player') {
+		git url: 'https://github.com/EasyRPG/Player.git', branch: 'master'
+	}
+}
+
+/* Player */
+
+pipeline {
+	parameters {
+		choice(name: 'PLATFORM_FILTER',
+			choices: ['all', 'Windows 32 bit', 'Windows 64 bit', 'Linux', '3DS', 'Switch', 'PSVita', 'Wii', 'WiiU'],
+			description: 'Run on specific platform(s)')
+	}
+	agent none
+	stages {
+		stage('Build and Test') {
+			parallel {
+				stage('Ports') {
+					agent {
+						label '3DS'
+					}
+					stages {
+						stage('Prepare') {
+							steps {
+								echo "Clone Sources"
+								myCheckout()
+							}
+						}
+						stage('Build') {
+							steps {
+								echo "Build"
+							}
+						}
+						stage('Install') {
+							steps {
+								echo "Install"
+							}
+						}
+						stage('Prepare Artifacts') {
+							steps {
+								echo "Artifacts"
+								sh 'touch port.tar.gz'
+								archiveArtifacts '*.tar.gz,*.zip'
+							}
+						}
+					}
+				}
+				stage('Linux') {
+					agent any // usually main, because others are reserved
+					stages {
+						stage('Prepare') {
+							steps {
+								echo "Clone Sources"
+								myCheckout()
+							}
+						}
+						stage('Build') {
+							steps {
+								echo "Build"
+							}
+						}
+						stage('Test') {
+							steps {
+								echo "Test"
+							}
+						}
+						stage('Install') {
+							steps {
+								echo "Install"
+							}
+						}
+						stage('Prepare Artifacts') {
+							steps {
+								echo "Artifacts"
+								sh 'touch linux.tar.gz'
+								archiveArtifacts '*.tar.gz,*.zip'
+							}
+						}
+					}
+				}
+				stage('Windows') {
+					agent {
+						label 'Windows'
+					}
+					stages {
+						stage('Prepare') {
+							steps {
+								echo "Clone Sources"
+								myCheckout()
+							}
+						}
+						stage('Build') {
+							steps {
+								echo "Build"
+							}
+						}
+						stage('Test') {
+							steps {
+								echo "Test"
+							}
+						}
+						stage('Install') {
+							steps {
+								echo "Install"
+							}
+						}
+						stage('Prepare Artifacts') {
+							steps {
+								echo "Artifacts"
+								bat 'echo "">windows.zip'
+								archiveArtifacts '*.tar.gz,*.zip'
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	post {
+		always {
+			echo "always"
+			// TODO
+			//deleteDir() // clean up our workspace
+		}
+		failure {
+			echo "failed"
+			// TODO
+		}
+
+	}
+}

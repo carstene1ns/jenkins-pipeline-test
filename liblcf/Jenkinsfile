@@ -1,0 +1,193 @@
+#!groovy
+
+/* liblcf */
+
+pipeline {
+	parameters {
+		choice(name: 'PLATFORM_FILTER',
+			choices: ['all', 'Windows 32 bit', 'Windows 64 bit', 'Linux', '3DS', 'Switch', 'PSVita', 'Wii', 'WiiU'],
+			description: 'Run on specific platform(s)')
+	}
+	agent none
+	stages {
+		stage('Ports') {
+			failFast false
+			when {
+				expression { ['all', '3DS', 'Switch', 'PSVita', 'Wii', 'WiiU'].contains(params.PLATFORM_FILTER) }
+			}
+			matrix {
+				agent {
+					label "${PLATFORM}"
+				}
+				when { anyOf {
+					expression { params.PLATFORM_FILTER == 'all' }
+					expression { params.PLATFORM_FILTER == env.PLATFORM }
+				} }
+				axes {
+					axis {
+						name 'PLATFORM'
+						values '3DS', 'Switch', 'PSVita', 'Wii', 'WiiU'
+					}
+				}
+				environment {
+					EASYRPG_BUILDSCRIPTS="${WORKSPACE}/../toolchain-${PLATFORM.toLowerCase()}"
+				}
+				stages {
+					stage('Prepare') {
+						steps {
+							dir('lcf') {
+								git url: 'https://github.com/EasyRPG/liblcf.git'
+							}
+							sh "rm -rf build-${PLATFORM}"
+						}
+					}
+					stage('Build') {
+						steps {
+							echo "Build for ${PLATFORM}"
+							/*script {
+								PRESET = sh(script: "echo ${PLATFORM} | tr '[:upper:]' '[:lower:]'", returnStdout: true).trim()
+							}*/
+							sh label: 'cmake', script: """
+								cmake --preset ${PLATFORM.toLowerCase()}-relwithdebinfo -B build-${PLATFORM} -S lcf \
+									-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+									-DLIBLCF_WITH_XML=OFF -DLIBLCF_ENABLE_TOOLS=OFF -DLIBLCF_ENABLE_TESTS=OFF
+								cmake --build build-${PLATFORM}
+							"""
+						}
+					}
+					stage('Install') {
+						steps {
+							echo "Install for ${PLATFORM}"
+							sh "cmake --install build-${PLATFORM} --prefix ${PLATFORM.toLowerCase()}"
+						}
+					}
+				}
+			}
+		}
+		stage('Linux') {
+			agent any
+			when {
+				expression { ['all', 'Linux'].contains(params.PLATFORM_FILTER) }
+			}
+			environment {
+				EASYRPG_BUILDSCRIPTS="${WORKSPACE}/../toolchain-linux-static"
+			}
+			stages {
+				stage('Prepare') {
+					steps {
+						dir('lcf') {
+							git url: 'https://github.com/EasyRPG/liblcf.git'
+						}
+						sh "rm -rf build-linux"
+					}
+				}
+				stage('Build') {
+					steps {
+						echo "Build for Linux"
+						sh label: 'cmake', script: """
+							cmake --preset linux-relwithdebinfo -B build-linux -S lcf \
+								-DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+								-DLIBLCF_WITH_XML=ON -DLIBLCF_ENABLE_TOOLS=ON -DLIBLCF_ENABLE_TESTS=ON
+							cmake --build build-linux
+						"""
+					}
+				}
+				stage('Test') {
+					steps {
+						echo "Test for Linux"
+						sh "cmake --build build-linux --target check"
+					}
+				}
+				stage('Install') {
+					steps {
+						echo "Install for Linux"
+						sh "cmake --install build-linux --prefix linux"
+					}
+				}
+			}
+		}
+		stage('Windows') {
+			failFast false
+			when {
+				expression { ['all', 'Windows 32 bit', 'Windows 64 bit'].contains(params.PLATFORM_FILTER) }
+			}
+			matrix {
+				agent {
+					label 'Windows'
+				}
+				when { anyOf {
+					expression { params.PLATFORM_FILTER == 'all' }
+					expression { params.PLATFORM_FILTER == "Windows ${env.BITS} bit" }
+				} }
+				axes {
+					axis {
+						name 'BITS'
+						values '32', '64'
+					}
+					axis {
+						name 'CONFIG'
+						values 'debug', 'release'
+					}
+				}
+				stages {
+					stage('Prepare') {
+						steps {
+							dir('lcf') {
+								git url: 'https://github.com/EasyRPG/liblcf.git'
+							}
+							bat "if exist 'build-${BITS}' rd /S /Q 'build-${BITS}'"
+						}
+					}
+					stage('Build') {
+						steps {
+							echo "Build for Windows ${BITS} bit - ${CONFIG}"
+							bat label: 'cmake', script: """
+								if ${BITS}==32 (call %VCVARSALL2017% amd64_x86) else (call %VCVARSALL2017% x64)
+
+								if ${CONFIG}==debug (SET type=Debug) else (SET type=RelWithDebInfo)
+								if ${BITS}==32 (SET triplet=x86-windows-static) else (SET triplet=x64-windows-static)
+								cmake -GNinja -B${CONFIG} -S lcf -DCMAKE_BUILD_TYPE=%type%^
+									-DSHARED_RUNTIME=OFF -DVCPKG_TARGET_TRIPLET=%triplet%^
+									-DCMAKE_TOOLCHAIN_FILE="%EASYDEV_VCPKG%\\scripts\\buildsystems\\vcpkg.cmake"^
+									-DBUILD_SHARED_LIBS=OFF^
+									-DCMAKE_INSTALL_PREFIX="%CD%\\build-${BITS}"
+								cmake --build ${CONFIG}
+							"""
+						}
+					}
+					stage('Test') {
+						steps {
+							echo "Test for Windows ${BITS} bit - ${CONFIG}"
+							bat """
+								if ${BITS}==32 (call %VCVARSALL2017% amd64_x86) else (call %VCVARSALL2017% x64)
+
+								cmake --build ${CONFIG} --target check
+							"""
+						}
+					}
+					stage('Install') {
+						steps {
+							echo "Install for Windows ${BITS} bit - ${CONFIG}"
+							bat """
+								if ${BITS}==32 (call %VCVARSALL2017% amd64_x86) else (call %VCVARSALL2017% x64)
+
+								cmake --build ${CONFIG} --target install
+							"""
+						}
+					}
+				}
+			}
+		}
+	}
+	post {
+		always {
+			echo "always"
+			// artifacts?
+		}
+		failure {
+			echo "failed"
+			// TODO
+		}
+
+	}
+}
